@@ -58,8 +58,8 @@ export default function NLQueryPanel({ api }) {
   return (
     <div style={s.container}>
       <div style={s.header}>
-        <h2 style={s.title}>🔎 Natural Language Query</h2>
-        <p style={s.subtitle}>Ask anything about your product data in plain English — powered by Gemini text-to-SQL</p>
+        <h2 style={s.title}>Ask Your Data</h2>
+        <p style={s.subtitle}>Ask anything about your product data in plain English — Type a question in plain English — we will look it up for you</p>
       </div>
 
       {/* Input */}
@@ -77,7 +77,7 @@ export default function NLQueryPanel({ api }) {
           onClick={() => handleSubmit()}
           disabled={loading || !question.trim()}
         >
-          {loading ? '⏳ Querying...' : '▶ Ask'}
+          {loading ? "Looking up..." : "Ask"}
         </button>
       </div>
 
@@ -93,7 +93,7 @@ export default function NLQueryPanel({ api }) {
 
       {/* Error */}
       {error && (
-        <div style={s.errorBox}>❌ {error}</div>
+        <div style={s.errorBox}>{error}</div>
       )}
 
       {/* Result */}
@@ -101,7 +101,7 @@ export default function NLQueryPanel({ api }) {
         <div style={s.resultCard}>
           {/* Answer */}
           <div style={s.answerBox}>
-            <span style={s.answerLabel}>💡 Answer</span>
+            <span style={s.answerLabel}>Answer</span>
             <p style={s.answerText}>
               {result.error
                 ? <span style={{ color: '#fc8181' }}>SQL error: {result.error}</span>
@@ -111,14 +111,14 @@ export default function NLQueryPanel({ api }) {
 
           {/* SQL */}
           <details style={s.sqlDetails}>
-            <summary style={s.sqlSummary}>🔧 Generated SQL</summary>
+            <summary style={s.sqlSummary}>View the generated SQL</summary>
             <pre style={s.sqlCode}>{result.sql}</pre>
           </details>
 
           {/* Results table */}
           {result.columns && result.columns.length > 0 && result.rows && result.rows.length > 0 && (
             <div style={s.tableWrap}>
-              <div style={s.tableLabel}>📋 Query Results ({result.rows.length} row{result.rows.length !== 1 ? 's' : ''})</div>
+              <div style={s.tableLabel}>Results ({result.rows.length} row{result.rows.length !== 1 ? 's' : ''})</div>
               <div style={s.tableScroll}>
                 <table style={s.table}>
                   <thead>

@@ -3,22 +3,60 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from 'recharts';
 
+const TEST_LABELS = {
+  kitagawa_oaxaca:       'User Mix Analysis',
+  segment_share_drift:   'Segment Breakdown',
+  funnel_drop_test:      'Funnel Drop Check',
+  feature_adoption_test: 'Feature Usage Check',
+  cohort_age_test:       'New User Age Check',
+  event_volume_test:     'Data Volume Check',
+};
+
+const HYPOTHESIS_LABELS = {
+  composition_shift: 'User mix changed',
+  behavioral_change: 'User behavior changed',
+  feature_rollout:   'A feature change caused this',
+  cohort_age_effect: 'New users are too recent to count',
+  data_artifact:     'Tracking or data issue',
+};
+
+function friendlyTestName(name) {
+  if (!name) return name;
+  return TEST_LABELS[name] || name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function friendlyLabel(label, id) {
+  if (id && HYPOTHESIS_LABELS[id]) return HYPOTHESIS_LABELS[id];
+  return label;
+}
+
 export default function InvestigationPanel({ api, investigationId }) {
   const [investigation, setInvestigation] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedStep, setSelectedStep] = useState(0);
   const pollRef = useRef(null);
+  const autoFollow = useRef(true);
+  const prevStepCount = useRef(0);
 
   useEffect(() => {
     if (!investigationId) return;
     setLoading(true);
     setSelectedStep(0);
+    autoFollow.current = true;
+    prevStepCount.current = 0;
 
     const poll = async () => {
       try {
         const res = await fetch(`${api}/investigations/${investigationId}`);
         const data = await res.json();
-        setInvestigation(data);
+        setInvestigation(prev => {
+          const newCount = (data.steps || []).length;
+          if (newCount > prevStepCount.current && autoFollow.current) {
+            setSelectedStep(newCount - 1);
+            prevStepCount.current = newCount;
+          }
+          return data;
+        });
         if (data.status === 'running') {
           pollRef.current = setTimeout(poll, 1500);
         } else {
@@ -36,10 +74,9 @@ export default function InvestigationPanel({ api, investigationId }) {
   if (!investigationId) {
     return (
       <div style={styles.empty}>
-        <div style={{ fontSize: 40, marginBottom: 12 }}>🧠</div>
-        <div style={{ fontSize: 16, color: '#a0aec0' }}>No investigation selected.</div>
-        <div style={{ fontSize: 13, color: '#718096', marginTop: 6 }}>
-          Click <strong>"Trigger Investigation"</strong> in the header, or select one from the Investigations tab.
+        <div style={{ fontSize: 15, color: '#a0aec0', marginBottom: 6 }}>No investigation selected</div>
+        <div style={{ fontSize: 13, color: '#718096' }}>
+          Select a metric and click <strong>Investigate</strong>, or pick one from the Investigations tab.
         </div>
       </div>
     );
@@ -54,79 +91,82 @@ export default function InvestigationPanel({ api, investigationId }) {
 
   return (
     <div style={styles.container}>
-      {/* Investigation Header */}
       <div style={styles.invHeader}>
         <div style={styles.invMeta}>
           <span style={styles.invId}>Investigation #{investigation.id}</span>
           <StatusBadge status={investigation.status} />
-          {isRunning && <span style={styles.runningDots}>running adaptive investigation...</span>}
+          {isRunning && (
+            <span style={styles.runningText}>Step {steps.length + 1} in progress...</span>
+          )}
         </div>
         <div style={styles.invStats}>
-          <div style={styles.metricDrop}>
-            <span style={styles.metricName}>{investigation.triggered_metric}</span>
-            <span style={styles.metricChange}>
+          <div style={styles.statBlock}>
+            <span style={styles.statLabel}>{investigation.triggered_metric?.replace(/_/g, ' ')}</span>
+            <span style={{ ...styles.statValue, color: '#fc8181' }}>
               {investigation.magnitude_pct > 0 ? '+' : ''}{investigation.magnitude_pct?.toFixed(1)}%
             </span>
           </div>
-          <div style={styles.testCount}>
-            <span style={styles.testCountNum}>{investigation.tests_run}</span>
-            <span style={styles.testCountLabel}>tests run</span>
+          <div style={styles.statBlock}>
+            <span style={styles.statLabel}>steps done</span>
+            <span style={styles.statValue}>{investigation.tests_run}</span>
           </div>
-          <div style={styles.testCount}>
-            <span style={{ fontSize: 22, fontWeight: 700, color: '#68d391', display: 'block' }}>
-              {Math.max(0, 6 - (investigation.tests_run || 0))}
-            </span>
-            <span style={styles.testCountLabel}>budget saved</span>
-          </div>
+          {isRunning && (
+            <div style={styles.statBlock}>
+              <span style={styles.statLabel}>max steps</span>
+              <span style={{ ...styles.statValue, color: '#a0aec0' }}>6</span>
+            </div>
+          )}
         </div>
       </div>
 
       <div style={styles.mainGrid}>
-        {/* Step-by-step trace */}
         <div style={styles.stepsPanel}>
-          <div style={styles.panelTitle}>
-            🔍 Adaptive Investigation Trace
-            <span style={styles.noveltyTag}>Novel: Greedy Info-Gain Selector</span>
-          </div>
+          <div style={styles.panelTitle}>Analysis Steps</div>
 
           {steps.length === 0 && isRunning && (
             <div style={styles.loadingSteps}>
               <div style={styles.spinner} />
-              Generating hypotheses and selecting first test...
+              Choosing the first check to run...
             </div>
           )}
 
           {steps.map((step, i) => (
             <div
               key={i}
-              onClick={() => setSelectedStep(i)}
-              style={{
-                ...styles.stepCard,
-                ...(selectedStep === i ? styles.stepCardActive : {}),
-              }}
+              onClick={() => { autoFollow.current = false; setSelectedStep(i); }}
+              style={{ ...styles.stepCard, ...(selectedStep === i ? styles.stepCardActive : {}) }}
             >
               <div style={styles.stepNumber}>Step {step.step_number}</div>
-              <div style={styles.stepName}>{step.test_name}</div>
+              <div style={styles.stepName}>{friendlyTestName(step.test_name)}</div>
               <div style={styles.stepRationale}>{step.test_rationale}</div>
               <div style={styles.stepResult}>{step.result_summary}</div>
               {step.eliminated?.length > 0 && (
                 <div style={styles.eliminated}>
-                  ❌ Eliminated: {step.eliminated.join(', ')}
+                  Ruled out: {step.eliminated.map(e => HYPOTHESIS_LABELS[e] || e).join(', ')}
                 </div>
               )}
             </div>
           ))}
+
+          {isRunning && steps.length > 0 && (
+            <div style={styles.thinkingCard}>
+              <div style={styles.spinner} />
+              <div>
+                <div style={{ fontSize: 12, color: '#a0aec0', fontWeight: 600 }}>Step {steps.length + 1}</div>
+                <div style={{ fontSize: 11, color: '#718096', marginTop: 2 }}>Choosing and running next check...</div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Right panel: hypothesis state at selected step */}
         <div style={styles.rightPanel}>
           {currentStep && (
             <>
               <div style={styles.panelTitle}>
-                Hypothesis Confidences After Step {currentStep.step_number}
+                How likely is each explanation?
                 {prevStep && (
                   <span style={{ fontSize: 10, color: '#718096', fontWeight: 400, marginLeft: 8 }}>
-                    (arrows show change from step {prevStep.step_number})
+                    change from step {prevStep.step_number}
                   </span>
                 )}
               </div>
@@ -135,7 +175,6 @@ export default function InvestigationPanel({ api, investigationId }) {
                 prevHypotheses={prevStep ? prevStep.hypotheses_after : null}
               />
 
-              {/* Confidence change summary */}
               {prevStep && currentStep.hypotheses_after && (
                 <ConfidenceDeltaSummary
                   current={currentStep.hypotheses_after}
@@ -143,34 +182,29 @@ export default function InvestigationPanel({ api, investigationId }) {
                 />
               )}
 
-              {/* LLM Hypothesis Reasoning */}
               <HypothesisReasoningPanel hypotheses={currentStep.hypotheses_after} />
 
-              {/* Evidence details */}
               <div style={{ ...styles.panelTitle, marginTop: 16 }}>Evidence</div>
               <EvidenceBlock evidence={currentStep.evidence} />
 
-              {/* Per-step intermediate conclusion */}
               {currentStep.intermediate_conclusion && (
                 <div style={styles.intermediateCard}>
-                  <div style={styles.panelTitle}>🔎 Current Assessment (Step {currentStep.step_number})</div>
+                  <div style={styles.panelTitle}>Current Assessment (Step {currentStep.step_number})</div>
                   <p style={styles.intermediateText}>{currentStep.intermediate_conclusion}</p>
                 </div>
               )}
             </>
           )}
 
-          {/* Initial hypotheses (before any step) — only shown when step 0 selected and no prev */}
           {!currentStep && steps.length === 0 && !isRunning && (
             <div style={{ color: '#718096', fontSize: 13 }}>No steps recorded.</div>
           )}
 
-          {/* Final Gemini conclusion — only shown when viewing the last step or no step selected */}
           {investigation.status === 'completed' && (!currentStep || selectedStep === steps.length - 1) && (
             <div style={styles.conclusionCard}>
-              <div style={styles.panelTitle}>🎯 Final Conclusion</div>
+              <div style={styles.panelTitle}>Conclusion</div>
               <p style={styles.conclusionText}>{investigation.conclusion}</p>
-              <div style={{ ...styles.panelTitle, marginTop: 12 }}>💡 Recommendation</div>
+              <div style={{ ...styles.panelTitle, marginTop: 12 }}>What to do</div>
               <p style={styles.recommendationText}>{investigation.recommendation}</p>
             </div>
           )}
@@ -181,54 +215,44 @@ export default function InvestigationPanel({ api, investigationId }) {
 }
 
 function StatusBadge({ status }) {
-  const colors = {
-    running: { bg: '#2d3748', color: '#f6ad55' },
-    completed: { bg: '#1a4731', color: '#68d391' },
-    failed: { bg: '#742a2a', color: '#fc8181' },
+  const map = {
+    running:   { bg: '#2d3748', color: '#f6ad55', label: 'Running' },
+    completed: { bg: '#1a4731', color: '#68d391', label: 'Done' },
+    failed:    { bg: '#742a2a', color: '#fc8181', label: 'Failed' },
   };
-  const c = colors[status] || colors.running;
+  const c = map[status] || map.running;
   return (
     <span style={{ ...styles.badge, background: c.bg, color: c.color }}>
-      {status === 'running' ? '⟳ ' : status === 'completed' ? '✓ ' : '✗ '}
-      {status}
+      {c.label}
     </span>
   );
 }
 
-/**
- * Shows the LLM's reasoning behind each hypothesis (description field).
- * Collapsible so it doesn't clutter the default view.
- */
 function HypothesisReasoningPanel({ hypotheses }) {
   const [open, setOpen] = React.useState(false);
   if (!hypotheses || hypotheses.length === 0) return null;
 
   return (
     <div style={{ marginTop: 14 }}>
-      <button
-        onClick={() => setOpen(o => !o)}
-        style={{
-          background: 'none', border: '1px solid #2d3748', borderRadius: 4,
-          color: '#63b3ed', cursor: 'pointer', fontSize: 11, padding: '4px 10px',
-          display: 'flex', alignItems: 'center', gap: 6,
-        }}
-      >
-        🤖 {open ? '▲' : '▼'} LLM Hypothesis Reasoning
+      <button onClick={() => setOpen(o => !o)} style={styles.toggleBtn}>
+        {open ? 'Hide' : 'Show'} reasoning behind each explanation
       </button>
       {open && (
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {[...hypotheses].sort((a, b) => b.confidence - a.confidence).map(h => (
             <div key={h.id} style={{
-              background: '#151822', border: `1px solid ${h.active ? '#2d3748' : '#1a1f2e'}`,
-              borderRadius: 6, padding: '8px 12px',
+              background: '#151822',
+              border: `1px solid ${h.active ? '#2d3748' : '#1a1f2e'}`,
+              borderRadius: 6,
+              padding: '8px 12px',
               opacity: h.active ? 1 : 0.5,
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: h.active ? '#e2e8f0' : '#718096' }}>
-                  {h.label}
+                  {friendlyLabel(h.label, h.id)}
                 </span>
                 <span style={{ fontSize: 11, color: '#a0aec0' }}>
-                  {h.active ? `${Math.round(h.confidence * 100)}%` : 'eliminated'}
+                  {h.active ? `${Math.round(h.confidence * 100)}%` : 'ruled out'}
                 </span>
               </div>
               <div style={{ fontSize: 11, color: '#718096', lineHeight: 1.5 }}>
@@ -242,10 +266,6 @@ function HypothesisReasoningPanel({ hypotheses }) {
   );
 }
 
-
-/**
- * Shows a small +/- delta summary below the chart so small changes are always visible.
- */
 function ConfidenceDeltaSummary({ current, prev }) {
   if (!current || !prev) return null;
 
@@ -254,7 +274,7 @@ function ConfidenceDeltaSummary({ current, prev }) {
 
   const deltas = current
     .map(h => ({
-      label: h.label.split(' ').slice(0, 3).join(' '),
+      label: friendlyLabel(h.label, h.id).split(' ').slice(0, 3).join(' '),
       delta: h.confidence - (prevMap[h.id] || h.confidence),
       active: h.active,
     }))
@@ -263,7 +283,7 @@ function ConfidenceDeltaSummary({ current, prev }) {
 
   if (deltas.length === 0) return (
     <div style={{ fontSize: 11, color: '#4a5568', marginTop: 6, marginBottom: 4 }}>
-      No significant confidence change from previous step.
+      No significant change from previous step.
     </div>
   );
 
@@ -278,7 +298,7 @@ function ConfidenceDeltaSummary({ current, prev }) {
           borderRadius: 4,
           padding: '2px 7px',
         }}>
-          {d.delta > 0 ? '▲' : '▼'} {d.label}: {(Math.abs(d.delta) * 100).toFixed(1)}%
+          {d.delta > 0 ? '+' : '-'} {d.label}: {(Math.abs(d.delta) * 100).toFixed(1)}%
         </span>
       ))}
     </div>
@@ -287,7 +307,7 @@ function ConfidenceDeltaSummary({ current, prev }) {
 
 function HypothesisChart({ hypotheses, prevHypotheses }) {
   if (!hypotheses || hypotheses.length === 0) return (
-    <div style={{ color: '#718096', fontSize: 12, padding: '12px 0' }}>No hypothesis data for this step.</div>
+    <div style={{ color: '#718096', fontSize: 12, padding: '12px 0' }}>No data for this step.</div>
   );
 
   const prevMap = {};
@@ -299,9 +319,8 @@ function HypothesisChart({ hypotheses, prevHypotheses }) {
     .sort((a, b) => b.confidence - a.confidence)
     .map(h => ({
       id: h.id,
-      name: h.label.split(' ').slice(0, 2).join(' '),
+      name: friendlyLabel(h.label, h.id).split(' ').slice(0, 4).join(' '),
       confidence: Math.round(h.confidence * 100),
-      prev: prevMap[h.id] !== undefined ? Math.round(prevMap[h.id] * 100) : null,
       active: h.active,
       delta: prevMap[h.id] !== undefined ? h.confidence - prevMap[h.id] : 0,
     }));
@@ -309,10 +328,10 @@ function HypothesisChart({ hypotheses, prevHypotheses }) {
   return (
     <div>
       <ResponsiveContainer width="100%" height={180}>
-        <BarChart data={data} layout="vertical" margin={{ top: 0, right: 40, bottom: 0, left: 80 }}>
+        <BarChart data={data} layout="vertical" margin={{ top: 0, right: 40, bottom: 0, left: 120 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" horizontal={false} />
           <XAxis type="number" domain={[0, 100]} tick={{ fill: '#718096', fontSize: 10 }} tickFormatter={v => `${v}%`} />
-          <YAxis type="category" dataKey="name" tick={{ fill: '#a0aec0', fontSize: 11 }} width={80} />
+          <YAxis type="category" dataKey="name" tick={{ fill: '#a0aec0', fontSize: 10 }} width={120} />
           <Tooltip
             contentStyle={{ background: '#1a1f2e', border: '1px solid #2d3748', color: '#e2e8f0' }}
             formatter={(v, name, props) => {
@@ -320,10 +339,10 @@ function HypothesisChart({ hypotheses, prevHypotheses }) {
               const deltaStr = d.delta !== 0
                 ? ` (${d.delta > 0 ? '+' : ''}${(d.delta * 100).toFixed(1)}% from prev step)`
                 : '';
-              return [`${v}%${deltaStr}`, 'Confidence'];
+              return [`${v}%${deltaStr}`, 'Likelihood'];
             }}
           />
-          <Bar dataKey="confidence" radius={[0, 4, 4, 0]} label={<DeltaLabel prevMap={prevMap} />}>
+          <Bar dataKey="confidence" radius={[0, 4, 4, 0]}>
             {data.map((d, i) => (
               <Cell
                 key={i}
@@ -340,49 +359,39 @@ function HypothesisChart({ hypotheses, prevHypotheses }) {
         </BarChart>
       </ResponsiveContainer>
       <div style={{ fontSize: 10, color: '#4a5568', marginTop: 2 }}>
-        🟢 gained confidence · 🔴 lost confidence · 🔵 leading (unchanged) · ⬛ eliminated
+        Green = more likely &nbsp;·&nbsp; Red = less likely &nbsp;·&nbsp; Blue = leading &nbsp;·&nbsp; Grey = ruled out
       </div>
     </div>
   );
 }
 
-/**
- * Custom label that shows Δ% next to each bar when there's a meaningful change.
- */
-function DeltaLabel({ prevMap, x, y, width, height, value, name }) {
-  // `name` is the display name (2 words), we can't look up prevMap directly.
-  // The delta is shown in the ConfidenceDeltaSummary instead.
-  return null;
-}
-
 function EvidenceBlock({ evidence }) {
   if (!evidence) return null;
 
-  // Render segments if present (K-O decomposition)
   if (evidence.segments) {
     return (
       <div style={styles.evidenceBlock}>
         {evidence.composition_share_pct !== undefined && (
           <div style={styles.evidenceRow}>
-            <span style={styles.evidenceKey}>Composition Effect</span>
+            <span style={styles.evidenceKey}>How much is due to user mix changing</span>
             <span style={{ color: '#f6ad55' }}>{evidence.composition_share_pct}%</span>
           </div>
         )}
         {evidence.rate_share_pct !== undefined && (
           <div style={styles.evidenceRow}>
-            <span style={styles.evidenceKey}>Rate Effect</span>
+            <span style={styles.evidenceKey}>How much is due to behavior changing</span>
             <span style={{ color: '#63b3ed' }}>{evidence.rate_share_pct}%</span>
           </div>
         )}
-        <div style={{ marginTop: 8, fontSize: 11, color: '#718096' }}>By segment:</div>
+        <div style={{ marginTop: 8, fontSize: 11, color: '#718096' }}>Breakdown by channel:</div>
         {evidence.segments.map((s, i) => (
           <div key={i} style={styles.segmentRow}>
             <span style={{ color: '#e2e8f0', fontWeight: 500 }}>{s.channel}</span>
             <span style={{ color: '#a0aec0' }}>
-              {(s.baseline_rate * 100).toFixed(0)}% → {(s.current_rate * 100).toFixed(0)}%
+              {(s.baseline_rate * 100).toFixed(0)}% then, {(s.current_rate * 100).toFixed(0)}% now
             </span>
             <span style={{ color: '#718096' }}>
-              w: {(s.weight_baseline * 100).toFixed(0)}% → {(s.weight_current * 100).toFixed(0)}%
+              share: {(s.weight_baseline * 100).toFixed(0)}% then, {(s.weight_current * 100).toFixed(0)}% now
             </span>
           </div>
         ))}
@@ -390,7 +399,6 @@ function EvidenceBlock({ evidence }) {
     );
   }
 
-  // Generic evidence rendering
   return (
     <div style={styles.evidenceBlock}>
       {Object.entries(evidence).map(([k, v]) => {
@@ -423,15 +431,12 @@ const styles = {
     display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
   },
   invMeta: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
-  invId: { fontSize: 16, fontWeight: 700, color: '#e2e8f0' },
-  runningDots: { fontSize: 12, color: '#f6ad55', fontStyle: 'italic' },
-  invStats: { display: 'flex', gap: 20, alignItems: 'center' },
-  metricDrop: { textAlign: 'center' },
-  metricName: { fontSize: 11, color: '#718096', display: 'block' },
-  metricChange: { fontSize: 22, fontWeight: 700, color: '#fc8181' },
-  testCount: { textAlign: 'center' },
-  testCountNum: { fontSize: 22, fontWeight: 700, color: '#63b3ed', display: 'block' },
-  testCountLabel: { fontSize: 11, color: '#718096' },
+  invId: { fontSize: 15, fontWeight: 700, color: '#e2e8f0' },
+  runningText: { fontSize: 12, color: '#f6ad55', fontStyle: 'italic' },
+  invStats: { display: 'flex', gap: 24, alignItems: 'center' },
+  statBlock: { textAlign: 'center' },
+  statLabel: { fontSize: 11, color: '#718096', display: 'block' },
+  statValue: { fontSize: 22, fontWeight: 700, color: '#63b3ed', display: 'block' },
   badge: { borderRadius: 4, padding: '2px 8px', fontSize: 12, fontWeight: 600 },
   mainGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 },
   stepsPanel: {
@@ -443,46 +448,49 @@ const styles = {
     borderRadius: 8, padding: 16,
   },
   panelTitle: {
-    fontSize: 12, fontWeight: 700, color: '#a0aec0',
+    fontSize: 11, fontWeight: 700, color: '#a0aec0',
     textTransform: 'uppercase', letterSpacing: 0.5,
     marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8,
-  },
-  noveltyTag: {
-    background: '#2d3748', color: '#63b3ed',
-    borderRadius: 4, padding: '2px 6px', fontSize: 10,
   },
   stepCard: {
     background: '#151822', border: '1px solid #2d3748',
     borderRadius: 6, padding: '10px 12px', cursor: 'pointer',
     transition: 'border-color 0.15s',
   },
-  stepCardActive: {
-    border: '1px solid #63b3ed',
-    background: '#1a2744',
-  },
+  stepCardActive: { border: '1px solid #63b3ed', background: '#1a2744' },
   stepNumber: { fontSize: 10, color: '#718096', textTransform: 'uppercase', letterSpacing: 1 },
   stepName: { fontSize: 13, fontWeight: 600, color: '#e2e8f0', marginTop: 2 },
   stepRationale: { fontSize: 11, color: '#718096', marginTop: 4, fontStyle: 'italic' },
   stepResult: { fontSize: 12, color: '#a0aec0', marginTop: 6 },
   eliminated: { fontSize: 11, color: '#fc8181', marginTop: 4 },
-  loadingSteps: { color: '#718096', fontSize: 13, padding: '12px 0', display: 'flex', gap: 8, alignItems: 'center' },
+  loadingSteps: {
+    color: '#718096', fontSize: 13, padding: '12px 0',
+    display: 'flex', gap: 8, alignItems: 'center',
+  },
+  thinkingCard: {
+    background: '#151822', border: '1px dashed #4a5568',
+    borderRadius: 6, padding: '10px 12px',
+    display: 'flex', gap: 10, alignItems: 'center',
+    opacity: 0.8,
+  },
   spinner: {
     width: 14, height: 14, border: '2px solid #2d3748',
     borderTop: '2px solid #63b3ed', borderRadius: '50%',
     animation: 'spin 0.8s linear infinite',
   },
+  toggleBtn: {
+    background: 'none', border: '1px solid #2d3748', borderRadius: 4,
+    color: '#63b3ed', cursor: 'pointer', fontSize: 11, padding: '4px 10px',
+  },
   evidenceBlock: {
     background: '#151822', borderRadius: 6, padding: '10px 12px',
     fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4,
   },
-  evidenceRow: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-  },
+  evidenceRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   evidenceKey: { color: '#718096', textTransform: 'capitalize' },
   segmentRow: {
     display: 'flex', justifyContent: 'space-between',
-    padding: '2px 0', borderTop: '1px solid #2d3748',
-    fontSize: 11,
+    padding: '2px 0', borderTop: '1px solid #2d3748', fontSize: 11,
   },
   intermediateCard: {
     marginTop: 14, background: '#1a2535',

@@ -71,7 +71,7 @@ export default function MetricsDashboard({ api }) {
       {/* Anomaly Alert Banner */}
       {drop < -5 && (
         <div style={styles.alertBanner}>
-          <span style={styles.alertIcon}>🚨</span>
+          
           <div>
             <strong>Anomaly Detected:</strong> Retention rate dropped {Math.abs(drop).toFixed(1)}%
             vs prior period ({baselineAvg.toFixed(1)}% → {recentAvg.toFixed(1)}%).

@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -241,7 +242,6 @@ def run_detection_pass(db: Session) -> dict:
         }
 
         if is_anomaly:
-            # Fire an investigation automatically
             hint = f"Auto-detected by KS-test monitor. Baseline mean: {baseline_mean:.3f}, Current mean: {current_mean:.3f}, KS p-value: {p_value:.4f}, Change: {magnitude_pct:+.1f}%."
             inv = Investigation(
                 triggered_metric=metric,
@@ -251,15 +251,11 @@ def run_detection_pass(db: Session) -> dict:
                 status="running",
             )
             db.add(inv)
-            db.commit()
-            db.refresh(inv)
-
-            import threading
-            t = threading.Thread(target=_run_in_background, args=(inv.id, hint), daemon=True)
-            t.start()
+            # Flush to get the id without committing yet — we batch-commit after the loop
+            db.flush()
 
             result_entry["investigation_id"] = inv.id
-            anomalies_fired.append({"metric": metric, "investigation_id": inv.id})
+            anomalies_fired.append({"metric": metric, "investigation_id": inv.id, "hint": hint})
 
             _monitor_status["last_anomaly_metric"] = metric
             _monitor_status["last_anomaly_p"] = round(p_value, 4)
@@ -268,12 +264,27 @@ def run_detection_pass(db: Session) -> dict:
 
             logger.info(
                 f"[AnomalyDetector] ANOMALY: {metric} changed {magnitude_pct:+.1f}% "
-                f"(KS p={p_value:.4f}) → fired investigation #{inv.id}"
+                f"(KS p={p_value:.4f}) → will fire investigation #{inv.id}"
             )
         else:
             logger.info(f"[AnomalyDetector] {metric}: normal (KS p={p_value:.4f}, Δ={magnitude_pct:+.1f}%)")
 
         results.append(result_entry)
+
+    # Commit all new Investigation records in ONE transaction before starting any threads.
+    # This prevents a race where a background thread is already writing while the route
+    # is still committing more records.
+    if anomalies_fired:
+        db.commit()
+
+    import threading
+    for entry in anomalies_fired:
+        t = threading.Thread(
+            target=_run_in_background,
+            args=(entry["investigation_id"], entry.get("hint", "")),
+            daemon=True,
+        )
+        t.start()
 
     return {
         "checked_at": _monitor_status["last_check"],
@@ -286,13 +297,40 @@ def run_detection_pass(db: Session) -> dict:
 
 # ── API routes ────────────────────────────────────────────────────────────────
 
+@router.get("/metric-values")
+def get_metric_values(metric: str, db: Session = Depends(get_db)):
+    """
+    Returns the real current and baseline averages for a given metric,
+    using the same 7-day windows as the anomaly detector.
+    """
+    import statistics
+    try:
+        baseline, current = _fetch_metric_windows(db, metric)
+        if not baseline or not current:
+            return {"metric": metric, "current_value": None, "baseline_value": None, "error": "insufficient data"}
+        return {
+            "metric": metric,
+            "current_value": round(statistics.mean(current), 4),
+            "baseline_value": round(statistics.mean(baseline), 4),
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 @router.post("/check")
 def run_check(db: Session = Depends(get_db)):
     """
     Manually trigger one anomaly detection pass across all watched metrics.
     Fires investigations automatically for any detected anomalies.
     """
-    return run_detection_pass(db)
+    try:
+        return run_detection_pass(db)
+    except Exception as e:
+        logger.exception(f"[AnomalyDetector] /check failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "anomalies_fired": 0, "metrics_checked": 0},
+        )
 
 
 @router.get("/status")

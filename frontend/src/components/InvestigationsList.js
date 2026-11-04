@@ -69,7 +69,7 @@ export default function InvestigationsList({ api, onSelect }) {
                 ...styles.status,
                 color: inv.status === 'completed' ? '#68d391' : inv.status === 'running' ? '#f6ad55' : '#fc8181',
               }}>
-                {inv.status === 'completed' ? '✓' : inv.status === 'running' ? '⟳' : '✗'} {inv.status}
+                {inv.status === 'completed' ? 'Done' : inv.status === 'running' ? 'Running' : 'Failed'}
               </div>
               <div style={styles.magnitude}>
                 {inv.magnitude_pct > 0 ? '+' : ''}{inv.magnitude_pct?.toFixed(1)}%
@@ -89,7 +89,7 @@ export default function InvestigationsList({ api, onSelect }) {
                 }}
                 title="Delete investigation"
               >
-                🗑
+                Delete
               </button>
             </div>
           </div>
@@ -104,7 +104,7 @@ const styles = {
   loading: { color: '#718096', padding: 40, textAlign: 'center' },
   empty: { color: '#718096', padding: 40, textAlign: 'center', fontSize: 14 },
   header: {
-    fontSize: 14, fontWeight: 700, color: '#e2e8f0',
+    fontSize: 11, fontWeight: 700, color: '#e2e8f0',
     display: 'flex', alignItems: 'center', gap: 10,
   },
   count: {
@@ -120,7 +120,7 @@ const styles = {
   },
   rowLeft: { display: 'flex', gap: 12, alignItems: 'flex-start' },
   invId: { fontSize: 11, color: '#718096', minWidth: 28, marginTop: 2 },
-  metric: { fontSize: 14, fontWeight: 600, color: '#e2e8f0' },
+  metric: { fontSize: 11, fontWeight: 600, color: '#e2e8f0' },
   preview: { fontSize: 12, color: '#718096', marginTop: 2, maxWidth: 500 },
   rowRight: { display: 'flex', gap: 16, alignItems: 'center' },
   status: { fontSize: 12, fontWeight: 600 },
@@ -129,7 +129,7 @@ const styles = {
   timestamp: { fontSize: 11, color: '#718096', minWidth: 70, textAlign: 'right' },
   deleteBtn: {
     background: 'none', border: '1px solid #4a5568', borderRadius: 4,
-    color: '#fc8181', cursor: 'pointer', fontSize: 14,
+    color: '#fc8181', cursor: 'pointer', fontSize: 11,
     padding: '2px 6px', lineHeight: 1,
   },
 };

@@ -12,8 +12,52 @@ Each test entry specifies:
 
 from dataclasses import dataclass, field
 from typing import Any, Optional, Callable
+import math
 import numpy as np
-from scipy import stats
+
+
+def _chi2_contingency(table):
+    """Pure-Python chi-squared test on a 2-row contingency table."""
+    row_sums = [sum(row) for row in table]
+    col_sums = [sum(table[r][c] for r in range(len(table))) for c in range(len(table[0]))]
+    total = sum(row_sums)
+    if total == 0:
+        return 0.0, 1.0
+    chi2 = 0.0
+    for r, row in enumerate(table):
+        for c, obs in enumerate(row):
+            expected = row_sums[r] * col_sums[c] / total
+            if expected > 0:
+                chi2 += (obs - expected) ** 2 / expected
+    df = (len(table) - 1) * (len(table[0]) - 1)
+    # p-value via regularized incomplete gamma (chi2 CDF)
+    p = 1.0 - _chi2_cdf(chi2, df)
+    return chi2, p
+
+
+def _chi2_cdf(x, k):
+    """CDF of chi-squared distribution with k degrees of freedom."""
+    if x <= 0:
+        return 0.0
+    return _lower_gammainc(k / 2, x / 2) / math.gamma(k / 2)
+
+
+def _lower_gammainc(a, x, iterations=200):
+    """Lower regularized incomplete gamma via series expansion."""
+    if x == 0:
+        return 0.0
+    total = term = x ** a * math.exp(-x) / math.gamma(a + 1)
+    for n in range(1, iterations):
+        term *= x / (a + n)
+        total += term
+        if term < 1e-12:
+            break
+    return total
+
+
+def _norm_cdf(z):
+    """Standard normal CDF using math.erfc."""
+    return 0.5 * math.erfc(-z / math.sqrt(2))
 
 
 @dataclass
@@ -249,7 +293,7 @@ def run_segment_share_drift(db, context: dict) -> TestResult:
 
     # Chi-squared test of independence on the contingency table
     contingency = np.vstack([current_counts, baseline_counts])
-    chi2, p_value, _, _ = stats.chi2_contingency(contingency)
+    chi2, p_value = _chi2_contingency(contingency.tolist())
 
     current_shares = current_counts / current_counts.sum()
     baseline_shares = baseline_counts / baseline_counts.sum()
@@ -539,7 +583,7 @@ def run_cohort_age_test(db, context: dict) -> TestResult:
     pooled = (cur_ret + base_ret) / max(cur_users + base_users, 1)
     se = np.sqrt(pooled * (1 - pooled) * (1 / max(cur_users, 1) + 1 / max(base_users, 1)))
     z = (cur_rate - base_rate) / se if se > 0 else 0.0
-    p_value = float(stats.norm.cdf(z))
+    p_value = float(_norm_cdf(z))
     relative_change = (cur_rate - base_rate) / base_rate if base_rate > 0 else 0.0
 
     really_dropped = p_value < 0.05 and relative_change < -0.10

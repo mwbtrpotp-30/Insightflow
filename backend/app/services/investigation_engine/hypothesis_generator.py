@@ -59,7 +59,7 @@ HYPOTHESIS_TAXONOMY = [
         label="Within-Group Behavioral Change",
         description="Users in one or more segments are genuinely behaving differently (reaching fewer key features, churning earlier), independent of who they are.",
         confidence=0.25,
-        discriminating_tests=["kitagawa_oaxaca", "funnel_drop_test", "feature_adoption_test", "cohort_age_test"],
+        discriminating_tests=["kitagawa_oaxaca", "funnel_drop_test", "feature_adoption_test"],
     ),
     Hypothesis(
         id="feature_rollout",
@@ -80,7 +80,7 @@ HYPOTHESIS_TAXONOMY = [
         label="Data Pipeline Artifact",
         description="The anomaly is not real user behavior — it's a tracking gap, SDK drop, or data pipeline issue.",
         confidence=0.15,
-        discriminating_tests=["event_volume_test", "funnel_drop_test"],
+        discriminating_tests=["event_volume_test"],
     ),
 ]
 
@@ -199,7 +199,32 @@ Return only the JSON array, nothing else."""
             f"LLM returned {type(data).__name__} with {len(data) if isinstance(data, list) else '?'} items; expected list with ≥2"
         )
 
+    # Canonical IDs that match the test catalog's hypothesis_updates
+    CANONICAL_IDS = {"composition_shift", "behavioral_change", "feature_rollout", "cohort_age_effect", "data_artifact"}
+    _ID_KEYWORD_MAP = {
+        "composition": "composition_shift", "segment": "composition_shift", "mix": "composition_shift",
+        "behavioral": "behavioral_change", "behaviour": "behavioral_change", "churn": "behavioral_change",
+        "engagement": "behavioral_change", "session": "behavioral_change", "funnel": "behavioral_change",
+        "feature": "feature_rollout", "rollout": "feature_rollout", "release": "feature_rollout",
+        "bug": "feature_rollout", "regression": "feature_rollout",
+        "cohort": "cohort_age_effect", "age": "cohort_age_effect", "acquisition": "cohort_age_effect",
+        "data": "data_artifact", "artifact": "data_artifact", "pipeline": "data_artifact",
+        "tracking": "data_artifact", "instrumentation": "data_artifact",
+    }
+
+    def _canonicalize_id(raw_id: str) -> str:
+        if raw_id in CANONICAL_IDS:
+            return raw_id
+        lower = raw_id.lower()
+        for keyword, canonical in _ID_KEYWORD_MAP.items():
+            if keyword in lower:
+                logger.warning(f"[HypothesisGenerator] Remapping LLM id '{raw_id}' → '{canonical}'")
+                return canonical
+        logger.warning(f"[HypothesisGenerator] Unknown LLM id '{raw_id}'; defaulting to 'behavioral_change'")
+        return "behavioral_change"
+
     hypotheses: list[Hypothesis] = []
+    seen_ids: set[str] = set()
     for item in data:
         # Sanitise: keep only test IDs that actually exist in the catalog
         raw_tests = item.get("discriminating_tests") or []
@@ -210,9 +235,18 @@ Return only the JSON array, nothing else."""
             )
             valid_tests = ["kitagawa_oaxaca"]
 
+        canonical_id = _canonicalize_id(str(item["id"]))
+        if canonical_id in seen_ids:
+            # Merge duplicate into existing by boosting its confidence; skip adding a new entry
+            for h in hypotheses:
+                if h.id == canonical_id:
+                    h.confidence += float(item.get("confidence", 0.0))
+            continue
+        seen_ids.add(canonical_id)
+
         hypotheses.append(
             Hypothesis(
-                id=str(item["id"]),
+                id=canonical_id,
                 label=str(item["label"]),
                 description=str(item["description"]),
                 confidence=float(item["confidence"]),
